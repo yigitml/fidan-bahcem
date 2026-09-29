@@ -1,6 +1,4 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "../vendor/shadcn-tailwind-4.13.0.css";
 @source "../app/**/*.{js,ts,jsx,tsx}";
 @source "../components/**/*.{js,ts,jsx,tsx}";
 :root { --paper:#f7f5ee; --ink:#183b2d; --muted:#617067; --line:#d8ddd5; --accent:#efb94f; --white:#fff; --background:var(--paper); --foreground:var(--ink); --card:#fff; --card-foreground:var(--ink); --popover:#fff; --popover-foreground:var(--ink); --primary:var(--ink); --primary-foreground:var(--paper); --secondary:#e5eadf; --secondary-foreground:var(--ink); --muted-foreground:var(--muted); --border:var(--line); --input:var(--line); --ring:#5b7c6b; --radius:.9rem; }
