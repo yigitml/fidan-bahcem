@@ -33,6 +33,8 @@ export default function CheckoutPage() {
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
+  const [error, setError] = useState("");
+  const [requestId] = useState(() => crypto.randomUUID());
 
   const detailed = useMemo(
     () =>
@@ -48,22 +50,27 @@ export default function CheckoutPage() {
   function change(id: string, delta: number) {
     replaceCart(
       cart
-        .map((line) => (line.id === id ? { ...line, quantity: line.quantity + delta } : line))
+        .map((line) => (line.id === id ? { ...line, quantity: Math.min(99,line.quantity + delta) } : line))
         .filter((line) => line.quantity > 0),
     );
   }
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cart.length || processing) return;
     setProcessing(true);
-    window.setTimeout(() => {
-      setOrderNumber(`FB-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`);
+    setError("");
+    const fields = new FormData(event.currentTarget);
+    try {
+      const response = await fetch('/api/store/order', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ requestId, items: cart, name: fields.get('name'), phone: fields.get('phone'), email: fields.get('email'), address: fields.get('address'), city: fields.get('city'), district: fields.get('district') }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setOrderNumber(result.order.id);
       replaceCart([]);
       setProcessing(false);
       setComplete(true);
       window.scrollTo({ top: 0, behavior: "smooth" });
-    }, 700);
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Sipariş kaydedilemedi. Tekrar deneyin.'); setProcessing(false); }
   }
 
   if (complete) {
@@ -79,7 +86,7 @@ export default function CheckoutPage() {
             <h1 className="mt-2 font-serif text-5xl tracking-[-0.04em]">Siparişiniz alındı.</h1>
             <p className="mt-4 text-sm font-semibold">Sipariş no: {orderNumber}</p>
             <p className="mt-5 leading-7 text-[var(--muted)]">
-              Fidanlarınız hazırlanmaya başladı. Türü kesin olmayan ürünler için sevkiyat öncesinde yakın çekim teyidi paylaşılacak.
+              Demo siparişiniz kaydedildi. Bu işlem gerçek tahsilat veya otomatik sevkiyat başlatmaz.
             </p>
             <div className="mt-7 rounded-2xl bg-[#f2f4ee] px-5 py-4 text-sm leading-6 text-[var(--muted)]">
               Bu sitedeki ödeme akışı demodur. Kart bilgileri saklanmaz ve gerçek tahsilat yapılmaz.
@@ -98,7 +105,8 @@ export default function CheckoutPage() {
         <div className="mb-10">
           <p className="eyebrow">Üyeliksiz ödeme</p>
           <h1 className="page-title">Teslimat bilgileri</h1>
-          <p className="mt-3 text-[var(--muted)]">Hesap açmadan siparişinizi tamamlayın.</p>
+          <p className="mt-3 text-[var(--muted)]">Hesap açmadan siparişinizi tamamlayın. Sipariş geçmişi için <Link href="/hesabim" className="underline">giriş yapın</Link>.</p>
+          {error && <p role="alert" className="mt-4 rounded-xl bg-white p-4 text-red-700">{error}</p>}
         </div>
 
         {ready && detailed.length === 0 ? (
