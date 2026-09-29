@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useSyncExternalStore } from "react";
 import type { CartLine } from "@/lib/cart";
+import { products } from '@/lib/products';
 
 let lines: CartLine[] = [];
 const serverLines: CartLine[] = [];
@@ -11,7 +12,10 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 
 function init() {
   if (ready) return;
-  try { lines = JSON.parse(window.localStorage?.getItem("fidan-bahcem-cart") || "[]"); } catch { /* in-memory fallback */ }
+  try {
+    const stored: unknown = JSON.parse(window.localStorage?.getItem("fidan-bahcem-cart") || "[]");
+    if(Array.isArray(stored)) lines = stored.filter((line): line is CartLine => !!line && typeof line.id==='string' && products.some(p=>p.id===line.id) && Number.isInteger(line.quantity) && line.quantity>0 && line.quantity<=99).slice(0,20);
+  } catch { /* in-memory fallback */ }
   ready = true;
   emit();
 }
@@ -24,7 +28,7 @@ export function replaceCart(next: CartLine[]) {
 
 export function addCart(id: string) {
   const existing = lines.find((line) => line.id === id);
-  replaceCart(existing ? lines.map((line) => line.id === id ? { ...line, quantity: line.quantity + 1 } : line) : [...lines, { id, quantity: 1 }]);
+  replaceCart(existing ? lines.map((line) => line.id === id ? { ...line, quantity: Math.min(99,line.quantity + 1) } : line) : [...lines, { id, quantity: 1 }]);
 }
 
 export function useCartStore() {
