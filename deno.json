@@ -1,0 +1,10 @@
+{
+  "nodeModulesDir": "manual",
+  "deploy": {
+    "org": "yigitml",
+    "app": "fidan-bahcem",
+    "framework": "nextjs",
+    "install": "npm ci",
+    "build": "npm run build"
+  }
+}
