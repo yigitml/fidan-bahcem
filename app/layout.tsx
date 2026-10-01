@@ -3,7 +3,14 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "Fidan Bahçem", template: "%s · Fidan Bahçem" },
-  description: "Özenle seçilmiş fidanlar. Üyeliksiz, kolay sipariş ve sevkiyat öncesi tür teyidi.",
+  description: "Fidanları boy, ışık ve sulama ihtiyaçlarıyla karşılaştırın. Fidan Bahçem demo mağazasında üyeliksiz sipariş sürecini deneyin.",
+  applicationName: "Fidan Bahçem",
+  openGraph: {
+    title: "Fidan Bahçem",
+    description: "Bahçeniz için fidanları keşfedin; boy ve bakım bilgilerini karşılaştırın.",
+    locale: "tr_TR",
+    type: "website",
+  },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

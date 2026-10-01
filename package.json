@@ -8,13 +8,22 @@
   "scripts": {
     "install:ci": "npm ci",
     "dev": "next dev",
-    "build": "NODE_OPTIONS=--max-old-space-size=640 next build",
+    "build": "NODE_OPTIONS=--max-old-space-size=1536 next build --webpack && node scripts/prepare-standalone.mjs",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "test:acceptance": "node scripts/acceptance.mjs"
+    "test:acceptance": "node scripts/acceptance.mjs",
+    "test:runtime-config": "node scripts/runtime-config-tests.mjs",
+    "start:local": "deno run --allow-all --unstable-kv scripts/start-local.mjs",
+    "test:cart": "node --import tsx --test scripts/cart-tests.ts",
+    "test:auth": "deno run --allow-read --allow-env --unstable-kv --unstable-sloppy-imports --config scripts/deno-tests.json scripts/auth-tests.ts",
+    "test:billing": "deno run --allow-read --allow-env --allow-sys --unstable-kv --unstable-sloppy-imports --config scripts/deno-tests.json scripts/billing-tests.ts",
+    "test:store": "deno run --allow-read --allow-env --unstable-kv --unstable-sloppy-imports --config scripts/deno-tests.json scripts/store-tests.ts",
+    "test": "npm run test:cart && npm run test:auth && npm run test:billing && npm run test:store"
   },
   "dependencies": {
+    "@revenuecat/purchases-js": "^1.67.1",
+    "google-auth-library": "^11.1.0",
     "lucide-react": "^0.561.0",
     "next": "16.3.7",
     "react": "^19.2.6",
@@ -28,6 +37,7 @@
     "eslint": "^9.39.2",
     "eslint-config-next": "16.3.7",
     "tailwindcss": "^4.1.18",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   },
   "type": "module"

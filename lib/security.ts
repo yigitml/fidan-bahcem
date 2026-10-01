@@ -5,11 +5,18 @@ export function hashPassword(password: string) {
   const salt = randomBytes(16).toString('hex');
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
 }
+// Unknown and Google-only accounts still perform one password derivation per login attempt.
+export const dummyPasswordHash = hashPassword('unusable-account-password');
 export function verifyPassword(password: string, hash: string) {
+  if (!/^[a-f0-9]{32}:[a-f0-9]{128}$/.test(hash)) return false;
   const [salt, expected] = hash.split(':');
   const actual = scryptSync(password, salt, 64);
   const stored = Buffer.from(expected, 'hex');
   return stored.length === actual.length && timingSafeEqual(stored, actual);
+}
+export function password(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 128) throw new Error('Lütfen şifrenizi kontrol edin.');
+  return value;
 }
 export function text(value: unknown, maximum = 300): string {
   if (typeof value !== 'string' || !value.trim() || value.length > maximum) throw new Error('Lütfen bilgilerinizi kontrol edin.');
