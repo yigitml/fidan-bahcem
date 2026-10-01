@@ -16,15 +16,31 @@ jobs:
       - run: npm run lint
       - run: npm audit --omit=dev
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build
+        env:
+          NEXT_PUBLIC_REVENUECAT_WEB_API_KEY: rcb_sb_ci_build_fixture
       - name: Run standalone with isolated local database
         run: |
-          cp -r public .next/standalone/public
-          cp -r .next/static .next/standalone/.next/static
           export ADMIN_TEST_KEY=ci-only-synthetic-admin-key
           export ADMIN_KEY_HASH=$(node -e "process.stdout.write(require('node:crypto').createHash('sha256').update(process.env.ADMIN_TEST_KEY).digest('hex'))")
-          HOSTNAME=127.0.0.1 PORT=3000 deno eval --unstable-kv "await import('./.next/standalone/server.js')" > /tmp/fidan-server.log 2>&1 &
-          for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:3000/api/store/health && break; sleep 2; done
+          export APP_URL=http://127.0.0.1:3000
+          export FIDAN_KV_PATH=/tmp/fidan-ci/store.sqlite
+          export NEXT_PUBLIC_REVENUECAT_WEB_API_KEY=rcb_sb_ci_runtime_fixture
+          export REVENUECAT_SECRET_API_KEY=synthetic-ci-server-only-key
+          export REVENUECAT_WEBHOOK_SECRET=synthetic-ci-webhook-only-key
+          export REVENUECAT_ENVIRONMENT=sandbox
+          export REVENUECAT_ALLOWED_PRODUCT_IDS=ci_runtime_fixture
+          npm run start:local > /tmp/fidan-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/store/health; then ready=true; break; fi
+            sleep 2
+          done
+          test "$ready" = true
+          npm run test:runtime-config -- http://127.0.0.1:3000
           node scripts/acceptance.mjs http://127.0.0.1:3000
       - name: Diagnostics
         if: failure()

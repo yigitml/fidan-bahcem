@@ -1,0 +1,7 @@
+{
+  "nodeModulesDir": "manual",
+  "imports": {
+    "@/": "../",
+    "next/server": "../node_modules/next/server.js"
+  }
+}

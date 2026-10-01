@@ -3,8 +3,11 @@
   "deploy": {
     "org": "yigitml",
     "app": "fidan-bahcem-web",
-    "framework": "nextjs",
     "install": "npm ci",
-    "build": "npm run build"
+    "build": "npm run build",
+    "runtime": {
+      "entrypoint": "scripts/start-deploy.mjs",
+      "cwd": "."
+    }
   }
 }
