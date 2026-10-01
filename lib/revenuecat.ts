@@ -6,7 +6,7 @@ export type BillingEntitlement = { id: string; productId: string; active: boolea
 export type BillingPurchase = { productId: string; purchasedAt: string; transactionId: string };
 export type BillingSnapshot = { environment: BillingEnvironment; verifiedAt: string; providerTimestamp: number; latestEventTimestamp: number; entitlements: BillingEntitlement[]; purchases: BillingPurchase[]; managementUrl: string | null };
 export type BillingPublicConfig = { enabled: boolean; environment: BillingEnvironment | null; webApiKey: string | null; offeringId: string | null; allowedProductIds: string[] };
-type BillingConfig = BillingPublicConfig & { enabled: true; environment: BillingEnvironment; webApiKey: string; secretApiKey: string; webhookSecret: string };
+type BillingServerConfig = { environment: BillingEnvironment; secretApiKey: string; webhookSecret: string; allowedProductIds: string[] };
 type ProviderPurchase = { id?: unknown; store_transaction_id?: unknown; transaction_id?: unknown; purchase_date?: unknown; is_sandbox?: unknown; refunded_at?: unknown };
 type ProviderSubscription = ProviderPurchase & { expires_date?: unknown; grace_period_expires_date?: unknown; unsubscribe_detected_at?: unknown; billing_issues_detected_at?: unknown };
 type ProviderEntitlement = { product_identifier?: unknown; purchase_date?: unknown; expires_date?: unknown; grace_period_expires_date?: unknown };
@@ -23,29 +23,33 @@ const record = (value: unknown): Record<string, unknown> => value !== null && ty
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const date = (value: unknown): string | null => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 
-function configuration(): BillingConfig | null {
-  // The public SDK key is served through the status API at request time. Next's
-  // compiler can inline public property reads even through an env alias.
+function serverConfiguration(): BillingServerConfig | null {
   const env = process.env;
   const environment = env.REVENUECAT_ENVIRONMENT;
-  const runtimeWebApiKey: unknown = Reflect.get(env, 'NEXT_PUBLIC_REVENUECAT_WEB_API_KEY');
-  const webApiKey = typeof runtimeWebApiKey === 'string' ? runtimeWebApiKey.trim() : undefined;
   const secretApiKey = env.REVENUECAT_SECRET_API_KEY?.trim();
   const webhookSecret = env.REVENUECAT_WEBHOOK_SECRET?.trim();
   const allowedProductIds = identifiers(env.REVENUECAT_ALLOWED_PRODUCT_IDS);
-  if ((environment !== 'production' && environment !== 'sandbox') || !webApiKey || !secretApiKey || !webhookSecret || !allowedProductIds.length || allowedProductIds.length > 50) return null;
+  if ((environment !== 'production' && environment !== 'sandbox') || !secretApiKey || !webhookSecret || !allowedProductIds.length || allowedProductIds.length > 50) return null;
   if (allowedProductIds.some(id => id.length > 200 || /[\r\n]/.test(id))) return null;
-  // Sandbox keys must never accidentally enable a production checkout, or vice versa.
-  if ((webApiKey.startsWith('rcb_sb_') || webApiKey.startsWith('strp_sb_') || webApiKey.startsWith('test_')) !== (environment === 'sandbox')) return null;
-  if (!/^(rcb_|strp_|pdl_|test_)[a-zA-Z0-9_.-]+$/.test(webApiKey)) return null;
-  const offeringId = env.REVENUECAT_OFFERING_ID?.trim() || null;
-  if (offeringId && (offeringId.length > 200 || /[\r\n]/.test(offeringId))) return null;
-  return { enabled: true, environment, webApiKey, secretApiKey, webhookSecret, allowedProductIds, offeringId };
+  return { environment, secretApiKey, webhookSecret, allowedProductIds };
 }
 
 export function billingPublicConfig(): BillingPublicConfig {
-  const config = configuration();
-  return config ? { enabled: true, environment: config.environment, webApiKey: config.webApiKey, offeringId: config.offeringId, allowedProductIds: config.allowedProductIds } : { enabled: false, environment: null, webApiKey: null, offeringId: null, allowedProductIds: [] };
+  const disabled: BillingPublicConfig = { enabled: false, environment: null, webApiKey: null, offeringId: null, allowedProductIds: [] };
+  const config = serverConfiguration();
+  if (!config) return disabled;
+  // Checkout configuration is independent of server verification. The public SDK
+  // key is served at request time; property reads can be inlined even via an alias.
+  const env = process.env;
+  const runtimeWebApiKey: unknown = Reflect.get(env, 'NEXT_PUBLIC_REVENUECAT_WEB_API_KEY');
+  const webApiKey = typeof runtimeWebApiKey === 'string' ? runtimeWebApiKey.trim() : undefined;
+  if (!webApiKey) return disabled;
+  // Sandbox keys must never accidentally enable a production checkout, or vice versa.
+  if ((webApiKey.startsWith('rcb_sb_') || webApiKey.startsWith('strp_sb_') || webApiKey.startsWith('test_')) !== (config.environment === 'sandbox')) return disabled;
+  if (!/^(rcb_|strp_|pdl_|test_)[a-zA-Z0-9_.-]+$/.test(webApiKey)) return disabled;
+  const offeringId = env.REVENUECAT_OFFERING_ID?.trim() || null;
+  if (offeringId && (offeringId.length > 200 || /[\r\n]/.test(offeringId))) return disabled;
+  return { enabled: true, environment: config.environment, webApiKey, offeringId, allowedProductIds: config.allowedProductIds };
 }
 
 export function safeManagementUrl(value: unknown): string | null {
@@ -59,7 +63,7 @@ export function safeManagementUrl(value: unknown): string | null {
   } catch { return null; }
 }
 
-function normalizeSubscriber(value: unknown, config: BillingConfig): BillingSnapshot {
+function normalizeSubscriber(value: unknown, config: BillingServerConfig): BillingSnapshot {
   const payload = record(value);
   const subscriber = record(payload.subscriber) as ProviderSubscriber;
   // The API-key-authenticated URL identifies the requested account. Original IDs
@@ -103,7 +107,7 @@ function normalizeSubscriber(value: unknown, config: BillingConfig): BillingSnap
   return { environment: config.environment, verifiedAt: new Date().toISOString(), providerTimestamp, latestEventTimestamp: 0, entitlements, purchases: purchases.sort((a, b) => b.purchasedAt.localeCompare(a.purchasedAt)).slice(0, 100), managementUrl: safeManagementUrl(subscriber.management_url) };
 }
 
-async function fetchSubscriber(userId: string, config: BillingConfig): Promise<BillingSnapshot> {
+async function fetchSubscriber(userId: string, config: BillingServerConfig): Promise<BillingSnapshot> {
   let response: Response;
   try {
     response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(userId)}`, { headers: { Authorization: `Bearer ${config.secretApiKey}`, Accept: 'application/json' }, cache: 'no-store', signal: AbortSignal.timeout(15_000) });
@@ -124,7 +128,7 @@ function currentSnapshot(state: BillingSnapshot): BillingSnapshot {
 }
 
 export async function syncBillingUser(userId: string): Promise<BillingSnapshot> {
-  const config = configuration();
+  const config = serverConfiguration();
   if (!config) throw new BillingError('Hesap ödemeleri henüz kullanıma açılmadı.', 503);
   if (!uuid.test(userId)) throw new BillingError('Ödeme hesabı doğrulanamadı.', 409);
   const db = await database();
@@ -143,7 +147,7 @@ export async function syncBillingUser(userId: string): Promise<BillingSnapshot> 
 }
 
 export async function storedBillingUser(userId: string): Promise<BillingSnapshot | null> {
-  const config = configuration();
+  const config = serverConfiguration();
   if (!config) return null;
   const state = (await (await database()).get<BillingSnapshot>(snapshotKey(config.environment, userId))).value;
   if (!state) return null;
@@ -233,7 +237,7 @@ async function markEvent(db: KV, marker: Entry<EventRecord>, event: WebhookEvent
 }
 
 export async function processBillingWebhook(payload: unknown): Promise<{ replay: boolean; disposition: string }> {
-  const config = configuration();
+  const config = serverConfiguration();
   if (!config) throw new BillingError('Webhook yapılandırılmadı.', 503);
   const event = parseWebhook(payload);
   const db = await database();

@@ -245,7 +245,70 @@ try {
     assert.equal(body.config.webApiKey, 'rcb_sb_runtime-new-key'); assert.equal(body.snapshot.providerTimestamp, sandbox.providerTimestamp);
     delete process.env.NEXT_PUBLIC_REVENUECAT_WEB_API_KEY;
     body = await (await statusRoute.GET(request('/api/billing/status'))).json();
-    assert.equal(body.config.enabled, false); assert.equal(body.config.webApiKey, null); assert.equal(body.snapshot, null);
+    assert.equal(body.config.enabled, false); assert.equal(body.config.webApiKey, null); assert.equal(body.snapshot.providerTimestamp, sandbox.providerTimestamp);
+  });
+  await test('webhook-only configuration synchronizes a known account without exposing or enabling checkout', async () => {
+    delete process.env.NEXT_PUBLIC_REVENUECAT_WEB_API_KEY;
+    const disabled = { enabled: false, environment: null, webApiKey: null, offeringId: null, allowedProductIds: [] };
+    assert.deepEqual(billing.billingPublicConfig(), disabled);
+    const payload = event('INITIAL_PURCHASE');
+    const raw = JSON.stringify(payload);
+    const headers = { authorization: 'Bearer test-only-webhook-auth' };
+    assert.equal((await webhookRoute.POST(request('/api/billing/webhook', raw, {}, false))).status, 401);
+    assert.equal(providerCalls, 0);
+    let response = await webhookRoute.POST(request('/api/billing/webhook', raw, headers, false));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, replay: false, disposition: 'synchronized' });
+    const body = await (await statusRoute.GET(request('/api/billing/status'))).json();
+    assert.deepEqual(body.config, disabled);
+    assert.equal(body.snapshot.environment, 'sandbox');
+    assert.equal(body.snapshot.entitlements[0].active, true);
+    assert.equal(body.snapshot.latestEventTimestamp, payload.event.event_timestamp_ms);
+    assert.equal(JSON.stringify(body).includes('sk_test-only-never-real'), false);
+    assert.equal(JSON.stringify(body).includes('test-only-webhook-auth'), false);
+    response = await webhookRoute.POST(request('/api/billing/webhook', raw, headers, false));
+    assert.deepEqual(await response.json(), { ok: true, replay: true, disposition: 'synchronized' });
+    assert.equal(providerCalls, 1);
+    assert.equal((await syncRoute.POST(request('/api/billing/sync', JSON.stringify({ expectedProductId: product })))).status, 400);
+    const syncResponse = await syncRoute.POST(request('/api/billing/sync', '{}'));
+    assert.equal(syncResponse.status, 200);
+    assert.equal((await syncResponse.json()).snapshot.environment, 'sandbox');
+    const otherEnvironment = event('RENEWAL', { environment: 'PRODUCTION' });
+    response = await webhookRoute.POST(request('/api/billing/webhook', JSON.stringify(otherEnvironment), headers, false));
+    assert.deepEqual(await response.json(), { ok: true, replay: false, disposition: 'different_environment' });
+    assert.equal(providerCalls, 2);
+    assert.equal((await kv.get(['revenuecat', 'production', userId])).value, null);
+    assert.deepEqual(billing.billingPublicConfig(), disabled);
+  });
+  await test('invalid public checkout keys and offerings do not disable validated server verification', async () => {
+    const disabled = { enabled: false, environment: null, webApiKey: null, offeringId: null, allowedProductIds: [] };
+    for (const key of ['rcb_bad key', 'sk_not-a-public-key', 'rcb_live-key']) {
+      process.env.NEXT_PUBLIC_REVENUECAT_WEB_API_KEY = key;
+      assert.deepEqual(billing.billingPublicConfig(), disabled);
+      assert.equal((await billing.syncBillingUser(userId)).entitlements[0].active, true);
+    }
+    configure(); process.env.REVENUECAT_OFFERING_ID = 'invalid\noffering';
+    assert.deepEqual(billing.billingPublicConfig(), disabled);
+    assert.equal((await billing.syncBillingUser(userId)).entitlements[0].active, true);
+    configure('production', 'test_opposite-environment');
+    assert.deepEqual(billing.billingPublicConfig(), disabled);
+    assert.equal((await billing.syncBillingUser(userId)).entitlements.length, 0);
+  });
+  await test('missing or malformed server configuration fails closed even with a public SDK key', async () => {
+    const disabled = { enabled: false, environment: null, webApiKey: null, offeringId: null, allowedProductIds: [] };
+    const headers = { authorization: 'Bearer test-only-webhook-auth' };
+    for (const [name, value] of [
+      ['REVENUECAT_ENVIRONMENT', ''], ['REVENUECAT_ENVIRONMENT', 'invalid'],
+      ['REVENUECAT_SECRET_API_KEY', ''], ['REVENUECAT_WEBHOOK_SECRET', ''],
+      ['REVENUECAT_ALLOWED_PRODUCT_IDS', ''], ['REVENUECAT_ALLOWED_PRODUCT_IDS', 'invalid\nproduct'],
+    ]) {
+      configure(); process.env[name] = value;
+      assert.deepEqual(billing.billingPublicConfig(), disabled);
+      await rejectsStatus(billing.syncBillingUser(userId), 503);
+      assert.equal(await billing.storedBillingUser(userId), null);
+      assert.equal((await webhookRoute.POST(request('/api/billing/webhook', JSON.stringify(event()), headers, false))).status, 503);
+    }
+    assert.equal(providerCalls, 0);
   });
   await test('sync rejects cross-site, missing, malformed and scheme-mismatched origins', async () => {
     for (const value of ['', 'null', 'invalid', 'https://localhost:3000', 'http://localhost:3000.evil.invalid', 'http://localhost:3000/path', 'http://user@localhost:3000']) assert.equal((await syncRoute.POST(request('/api/billing/sync', '{}', { origin: value }))).status, 403, value);
